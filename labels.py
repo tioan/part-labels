@@ -11,7 +11,9 @@ https://git.familie-radermacher.ch/linux/ptouch-print.git
 ptouch-print itself does not list the PT-P900W and documents that printers above
 180 dpi are not supported correctly, so it is not used here.
 """
+import argparse
 import json
+import re
 import secrets
 import time
 from pathlib import Path
@@ -71,6 +73,15 @@ MIN_MARGIN_DOTS = 14  # 1 mm, the minimum feed margin
 
 STRIPS = Path(__file__).parent / "strips"
 LOOKUP = StatusLookup()
+
+
+def label_count(text: str) -> tuple[int, int]:
+    """Parse 100 as one strip of 100 labels and 5x100 as five strips of 100 labels."""
+    match = re.fullmatch(r"(?:(\d+)[xX])?(\d+)", text)
+    strips, per_strip = (int(match[1] or 1), int(match[2])) if match else (0, 0)
+    if strips < 1 or per_strip < 1:
+        raise argparse.ArgumentTypeError(tr("must be a number like 100 or strips x labels like 5x100"))
+    return strips, per_strip
 
 
 def module_mm(dots: int) -> float:
@@ -409,13 +420,45 @@ def cmd_labels(args) -> None:
         if tape not in STANDARD:
             raise SystemExit(tr("no standard label defined for {tape} mm tape", tape=tape))
         kind, dots = STANDARD[tape]
+        strips, per_strip = args.count
+        if strips > 1:
+            print(tr("{strips} strips with {count} labels each", strips=strips, count=per_strip))
         if args.tape is None:
-            confirm_tape(tape, kind, dots, args.count)
+            confirm_tape(tape, kind, dots, strips * per_strip)
         elif args.tape != tape:
             raise SystemExit(tr("{loaded} mm tape loaded, {requested} mm requested, nothing printed", loaded=tape, requested=args.tape))
         # Half cuts save tape, since every full cut costs about 20 mm of blank tape.
-        half_cut = args.count > 1 and not args.full_cut
-        print_series(printer, tape, [dots] * args.count, half_cut)
+        half_cut = per_strip > 1 and not args.full_cut
+        for strip in range(1, strips + 1):
+            if strip > 1:
+                # The tape may have run out or been changed since the previous strip.
+                require_ready_for_next_strip(printer.status(), tape, strip, strips)
+            print_series(printer, tape, [dots] * per_strip, half_cut)
+            if strips > 1:
+                print(tr("strip {strip}/{strips} printed", strip=strip, strips=strips))
+
+
+def require_ready_for_next_strip(status: bytes, tape: int, strip: int, strips: int) -> None:
+    done = strip - 1
+    if status[8] or status[9]:
+        raise SystemExit(
+            tr(
+                "printer error, stopped after {done} of {strips} strips: {errors}",
+                done=done,
+                strips=strips,
+                errors=LOOKUP.error_text(status),
+            )
+        )
+    if status[10] != tape:
+        raise SystemExit(
+            tr(
+                "{loaded} mm tape loaded, {needed} mm needed, stopped after {done} of {strips} strips",
+                loaded=status[10],
+                needed=tape,
+                done=done,
+                strips=strips,
+            )
+        )
 
 
 def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) -> None:
@@ -495,14 +538,20 @@ standard sizes (Data Matrix, module / code size):
   36 mm  2.26 mm / 31.6 mm   shelves, racks
 
 Several labels get half cuts between them and one full cut at the end, which saves tape.
+With 5x100 each strip is its own job with new IDs, and a printer problem stops the remaining strips.
 Without --tape, the detected tape is shown and you confirm it with [Y/n]."""),
         tr("""examples:
   uv run labels.py labels 20
+  uv run labels.py labels 5x100
   uv run labels.py labels 20 --tape 12
   uv run labels.py labels 5 --full-cut"""),
     )
     labels_parser = commands.choices["labels"]
-    labels_parser.add_argument("count", type=positive_int, help=tr("number of labels to print"))
+    labels_parser.add_argument(
+        "count",
+        type=label_count,
+        help=tr("number of labels, or strips x labels: 5x100 prints 5 separate strips with 100 labels each"),
+    )
     labels_parser.add_argument(
         "--tape",
         type=int,

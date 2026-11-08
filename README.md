@@ -54,6 +54,10 @@ uv run labels.py labels 20
 ```
 
 ```bash
+uv run labels.py labels 5x100
+```
+
+```bash
 uv run labels.py labels 20 --tape 9
 ```
 
@@ -77,6 +81,9 @@ A 24 MP photo takes about 40 seconds. Keep the output out of this public reposit
 
 `status` and printer errors are explained in plain text from the tables in `docs/`. `status --raw` also
 shows the raw bytes.
+
+`labels 5x100` prints 5 separate strips with 100 labels each, as one job per strip with new IDs. The script
+checks the printer before each further strip and stops on an error or a different tape.
 
 Without `--tape`, the script shows the detected tape and asks for confirmation (`[Y/n]`, Enter
 means yes). With `--tape`, printing stops if the loaded tape width does not match. `labels.py print-test-strip`,

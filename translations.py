@@ -70,6 +70,7 @@ standard sizes (Data Matrix, module / code size):
   36 mm  2.26 mm / 31.6 mm   shelves, racks
 
 Several labels get half cuts between them and one full cut at the end, which saves tape.
+With 5x100 each strip is its own job with new IDs, and a printer problem stops the remaining strips.
 Without --tape, the detected tape is shown and you confirm it with [Y/n].""": """Druckt neue Etiketten mit zufälligen IDs in der Standardgröße für das Band.
 
 Standardgrößen (Data Matrix, Modul / Codegröße):
@@ -81,15 +82,31 @@ Standardgrößen (Data Matrix, Modul / Codegröße):
   36 mm  2,26 mm / 31,6 mm   Regale, Racks
 
 Mehrere Etiketten erhalten Anschnitte dazwischen und einen vollen Schnitt am Ende, das spart Band.
+Bei 5x100 ist jeder Streifen ein eigener Auftrag mit neuen IDs, ein Druckerproblem stoppt die restlichen Streifen.
 Ohne --tape wird das erkannte Band angezeigt und mit [J/n] bestätigt.""",
     """examples:
   uv run labels.py labels 20
+  uv run labels.py labels 5x100
   uv run labels.py labels 20 --tape 12
   uv run labels.py labels 5 --full-cut""": """Beispiele:
   uv run labels.py labels 20
+  uv run labels.py labels 5x100
   uv run labels.py labels 20 --tape 12
   uv run labels.py labels 5 --full-cut""",
-    "number of labels to print": "Anzahl der zu druckenden Etiketten",
+    "number of labels, or strips x labels: 5x100 prints 5 separate strips with 100 labels each": (
+        "Anzahl der Etiketten oder Streifen x Etiketten: 5x100 druckt 5 einzelne Streifen mit je 100 Etiketten"
+    ),
+    "must be a number like 100 or strips x labels like 5x100": (
+        "muss eine Zahl wie 100 oder Streifen x Etiketten wie 5x100 sein"
+    ),
+    "{strips} strips with {count} labels each": "{strips} Streifen mit je {count} Etiketten",
+    "strip {strip}/{strips} printed": "Streifen {strip}/{strips} gedruckt",
+    "printer error, stopped after {done} of {strips} strips: {errors}": (
+        "Druckerfehler, Abbruch nach {done} von {strips} Streifen: {errors}"
+    ),
+    "{loaded} mm tape loaded, {needed} mm needed, stopped after {done} of {strips} strips": (
+        "{loaded}-mm-Band eingelegt, {needed} mm benötigt, Abbruch nach {done} von {strips} Streifen"
+    ),
     "required tape width in mm; prints without asking, but stops if another tape is loaded": (
         "erforderliche Bandbreite in mm; druckt ohne Rückfrage, bricht aber bei anderem Band ab"
     ),
