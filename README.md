@@ -10,8 +10,8 @@ Small ID labels for identifying parts in photos, printed on a Brother PT-P900W o
 | Small parts | 9 mm | Data Matrix 14x14 | 0.49 mm (7 dots) | 6.9 mm |
 | Last resort, good light only | 6 mm | Data Matrix 14x14 | 0.28 mm (4 dots) | 4.0 mm |
 
-- IDs are 10 random Crockford Base32 characters. There is no registry; `strips/issued.jsonl`
-  only logs what was sent to the printer, including aborted jobs.
+- IDs are 10 random Crockford Base32 characters. There is no registry; the local, unversioned
+  `strips/issued.jsonl` only logs what was sent to the printer, including aborted jobs.
 - A series gets half cuts between labels and one full cut at the end. Each full cut wastes
   about 20 mm of tape, because the printer ejects at least 27 mm per cut.
 - Avoid direct flash on glossy tape where possible.
@@ -68,3 +68,7 @@ means yes). With `--tape`, printing stops if the loaded tape width does not matc
   https://download.brother.com/welcome/docp100407/cv_ptp900_jpn_raster_102.pdf
 - ptouch-print by Dominic Radermacher (GPL-3.0), raster line bit layout, commit 3e026ef:
   https://git.familie-radermacher.ch/linux/ptouch-print.git
+
+## License
+
+MIT, see `LICENSE`. Dependencies keep their own licenses and are not part of this repository.

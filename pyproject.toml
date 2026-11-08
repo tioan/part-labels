@@ -3,6 +3,8 @@ name = "part-labels"
 version = "0.1.0"
 description = "Small ID labels for identifying parts in photos, printed on a Brother PT-P900W"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "libusb-package>=1.0.26",
