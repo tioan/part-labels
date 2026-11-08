@@ -160,5 +160,77 @@
     "module_mm": 0.282,
     "code_mm": 3.95,
     "quiet_modules_across_tape": 3.5
+  },
+  {
+    "id": "62QTG46RS1",
+    "kind": "QR",
+    "tape_mm": 24,
+    "dots_per_module": 9,
+    "module_mm": 0.635,
+    "code_mm": 13.33,
+    "quiet_modules_across_tape": 8.4
+  },
+  {
+    "id": "1M1B80P0WB",
+    "kind": "QR",
+    "tape_mm": 24,
+    "dots_per_module": 11,
+    "module_mm": 0.776,
+    "code_mm": 16.3,
+    "quiet_modules_across_tape": 5.0
+  },
+  {
+    "id": "EN7XJGTCMK",
+    "kind": "DM",
+    "tape_mm": 24,
+    "dots_per_module": 15,
+    "module_mm": 1.058,
+    "code_mm": 14.82,
+    "quiet_modules_across_tape": 4.3
+  },
+  {
+    "id": "TSA7VHAGNS",
+    "kind": "DM",
+    "tape_mm": 24,
+    "dots_per_module": 21,
+    "module_mm": 1.482,
+    "code_mm": 20.74,
+    "quiet_modules_across_tape": 1.1
+  },
+  {
+    "id": "D1J6658VFH",
+    "kind": "QR",
+    "tape_mm": 36,
+    "dots_per_module": 14,
+    "module_mm": 0.988,
+    "code_mm": 20.74,
+    "quiet_modules_across_tape": 7.8
+  },
+  {
+    "id": "979RT59HVX",
+    "kind": "QR",
+    "tape_mm": 36,
+    "dots_per_module": 17,
+    "module_mm": 1.199,
+    "code_mm": 25.19,
+    "quiet_modules_across_tape": 4.6
+  },
+  {
+    "id": "N7JQPJHEMZ",
+    "kind": "DM",
+    "tape_mm": 36,
+    "dots_per_module": 24,
+    "module_mm": 1.693,
+    "code_mm": 23.71,
+    "quiet_modules_across_tape": 3.7
+  },
+  {
+    "id": "7D395XGJ9R",
+    "kind": "DM",
+    "tape_mm": 36,
+    "dots_per_module": 32,
+    "module_mm": 2.258,
+    "code_mm": 31.61,
+    "quiet_modules_across_tape": 1.0
   }
 ]

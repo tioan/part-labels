@@ -49,6 +49,8 @@ GRID = {
     9: [("QR", 3), ("QR", 4), ("DM", 4), ("DM", 5), ("DM", 7)],
     12: [("QR", 4), ("QR", 5), ("QR", 6), ("DM", 5), ("DM", 7), ("DM", 10)],
     18: [("QR", 6), ("QR", 8), ("DM", 8), ("DM", 15)],
+    24: [("QR", 9), ("QR", 11), ("DM", 15), ("DM", 21)],
+    36: [("QR", 14), ("QR", 17), ("DM", 24), ("DM", 32)],
 }
 
 # Label standard per tape: the largest Data Matrix module with a full quiet zone.
