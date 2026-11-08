@@ -1,0 +1,164 @@
+[
+  {
+    "id": "W0NHHAF6XB",
+    "kind": "QR",
+    "tape_mm": 9,
+    "dots_per_module": 3,
+    "module_mm": 0.212,
+    "code_mm": 4.44,
+    "quiet_modules_across_tape": 10.8
+  },
+  {
+    "id": "1V3MVHYE42",
+    "kind": "QR",
+    "tape_mm": 9,
+    "dots_per_module": 4,
+    "module_mm": 0.282,
+    "code_mm": 5.93,
+    "quiet_modules_across_tape": 5.5
+  },
+  {
+    "id": "EAM1NR2HJK",
+    "kind": "DM",
+    "tape_mm": 9,
+    "dots_per_module": 4,
+    "module_mm": 0.282,
+    "code_mm": 3.95,
+    "quiet_modules_across_tape": 9.0
+  },
+  {
+    "id": "SKES3DXBYH",
+    "kind": "DM",
+    "tape_mm": 9,
+    "dots_per_module": 5,
+    "module_mm": 0.353,
+    "code_mm": 4.94,
+    "quiet_modules_across_tape": 5.8
+  },
+  {
+    "id": "PNMQ90HWKX",
+    "kind": "DM",
+    "tape_mm": 9,
+    "dots_per_module": 7,
+    "module_mm": 0.494,
+    "code_mm": 6.91,
+    "quiet_modules_across_tape": 2.1
+  },
+  {
+    "id": "HFRBQP9V99",
+    "kind": "QR",
+    "tape_mm": 12,
+    "dots_per_module": 4,
+    "module_mm": 0.282,
+    "code_mm": 5.93,
+    "quiet_modules_across_tape": 10.8
+  },
+  {
+    "id": "N66FV24CYJ",
+    "kind": "QR",
+    "tape_mm": 12,
+    "dots_per_module": 5,
+    "module_mm": 0.353,
+    "code_mm": 7.41,
+    "quiet_modules_across_tape": 6.5
+  },
+  {
+    "id": "E8PXQE7VFJ",
+    "kind": "QR",
+    "tape_mm": 12,
+    "dots_per_module": 6,
+    "module_mm": 0.423,
+    "code_mm": 8.89,
+    "quiet_modules_across_tape": 3.7
+  },
+  {
+    "id": "T2VGN8K08Q",
+    "kind": "DM",
+    "tape_mm": 12,
+    "dots_per_module": 5,
+    "module_mm": 0.353,
+    "code_mm": 4.94,
+    "quiet_modules_across_tape": 10.0
+  },
+  {
+    "id": "C7QEF13F3D",
+    "kind": "DM",
+    "tape_mm": 12,
+    "dots_per_module": 7,
+    "module_mm": 0.494,
+    "code_mm": 6.91,
+    "quiet_modules_across_tape": 5.1
+  },
+  {
+    "id": "FDCTH9ZW7S",
+    "kind": "DM",
+    "tape_mm": 12,
+    "dots_per_module": 10,
+    "module_mm": 0.706,
+    "code_mm": 9.88,
+    "quiet_modules_across_tape": 1.5
+  },
+  {
+    "id": "308877K4T7",
+    "kind": "QR",
+    "tape_mm": 18,
+    "dots_per_module": 6,
+    "module_mm": 0.423,
+    "code_mm": 8.89,
+    "quiet_modules_across_tape": 10.8
+  },
+  {
+    "id": "E7R7V57RG3",
+    "kind": "QR",
+    "tape_mm": 18,
+    "dots_per_module": 8,
+    "module_mm": 0.564,
+    "code_mm": 11.85,
+    "quiet_modules_across_tape": 5.5
+  },
+  {
+    "id": "TA8ND707DS",
+    "kind": "DM",
+    "tape_mm": 18,
+    "dots_per_module": 8,
+    "module_mm": 0.564,
+    "code_mm": 7.9,
+    "quiet_modules_across_tape": 9.0
+  },
+  {
+    "id": "FDF8A2S11G",
+    "kind": "DM",
+    "tape_mm": 18,
+    "dots_per_module": 15,
+    "module_mm": 1.058,
+    "code_mm": 14.82,
+    "quiet_modules_across_tape": 1.5
+  },
+  {
+    "id": "TDJPD2VAPX",
+    "kind": "QR",
+    "tape_mm": 6,
+    "dots_per_module": 3,
+    "module_mm": 0.212,
+    "code_mm": 4.44,
+    "quiet_modules_across_tape": 3.5
+  },
+  {
+    "id": "JQPRTF3942",
+    "kind": "DM",
+    "tape_mm": 6,
+    "dots_per_module": 3,
+    "module_mm": 0.212,
+    "code_mm": 2.96,
+    "quiet_modules_across_tape": 7.0
+  },
+  {
+    "id": "AYNA51NYZR",
+    "kind": "DM",
+    "tape_mm": 6,
+    "dots_per_module": 4,
+    "module_mm": 0.282,
+    "code_mm": 3.95,
+    "quiet_modules_across_tape": 3.5
+  }
+]
