@@ -34,7 +34,10 @@ and yellow tape, so other surfaces may behave differently.
   preprocessing.
 - 18, 24 and 36 mm: all probe labels read directly in photos of a whole room, at 5.6 to 10.3 px
   per module. On 24 and 36 mm the quiet zone across the tape is tight, without causing problems.
-- QR codes were tested too. Same-size modules can read as well as Data Matrix, but Data Matrix
+- Nine labels from 0.21 to 0.49 mm in one 24 MP photo in good light: all found, 8 directly,
+  down to about 3 px per module. Use original photos, as images scaled down for chat or
+  messaging lose labels that the original still shows.
+- QR codes were tested too. Same-size modules read about as well as Data Matrix, but Data Matrix
   needs fewer modules and so gets about twice the module size on the same tape.
 
 ## Usage
@@ -55,8 +58,22 @@ uv run labels.py labels 20 --tape 9
 ```
 
 ```bash
-uv run read_photo.py photo1.jpg photo2.jpg
+uv run read_photo.py photo1.jpg photo2.heic
 ```
+
+```bash
+uv run sort_photos.py ~/Pictures/parts
+```
+
+`sort_photos.py` writes to `<folder>-sorted` next to the photo folder, or to `--out`. It creates
+`index.csv`, `parts/<id>/` and `unmatched/`, all with symbolic links, so originals stay untouched.
+A photo showing several labels appears in the folder of each label and gets one row per label in
+`index.csv`. Photos with a single part are the clearest match, since a folder only says that the
+label is somewhere in the photo.
+
+Photos already in the index are skipped; use `--rescan` to read them again. Links point to the
+original path, so rescan after moving the photos. Only the given folder is read, not subfolders.
+A 24 MP photo takes about 40 seconds. Keep the output out of this public repository.
 
 Without `--tape`, the script shows the detected tape and asks for confirmation (`[Y/n]`, Enter
 means yes). With `--tape`, printing stops if the loaded tape width does not match. `labels.py generate`, `verify` and

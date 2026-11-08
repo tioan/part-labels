@@ -7,6 +7,9 @@ from pathlib import Path
 
 import zxingcpp
 from PIL import Image, ImageFilter, ImageOps
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
 
 STRIPS = Path(__file__).parent / "strips"
 ID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{10}$")
