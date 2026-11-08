@@ -74,6 +74,7 @@ MIN_EJECT_MM = 27  # The shortest piece of tape the printer can cut, from the ra
 LEADER_MM = 22  # Blank tape before the first label of a job, measured on a photo of 6 mm tape
 PRINT_WRITE_TIMEOUT_MS = 30000
 STATUS_WRITE_TIMEOUT_MS = 5000
+START_TIMEOUT_S = 15
 
 # Both languages accept both answers, so a habit from the other language cannot cancel a job.
 YES = ("", "y", "yes", "j", "ja")
@@ -654,6 +655,14 @@ def require_ready_for_next_strip(status: bytes, tape: int, strip: int, strips: i
         )
 
 
+def log_job(event: str, **details) -> None:
+    """Keep the printer's replies locally, because they are the only evidence after a failed job."""
+    STRIPS.mkdir(exist_ok=True)
+    entry = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": event, **details}
+    with (STRIPS / "print-log.jsonl").open("a") as log:
+        log.write(json.dumps(entry) + "\n")
+
+
 def labels_handed_over(sent_bytes: int, pages: list[bytes]) -> int:
     """Count the pages that were sent completely."""
     count = 0
@@ -681,24 +690,37 @@ def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) 
     header = b"\x00" * 200 + b"\x1b@"
     printer.sent_bytes = 0
     print(tr("printing {count} labels ...", count=len(ids)), flush=True)
+    log_job("send", tape=tape, labels=len(ids))
     completed = 0
+    sent = started = False
     try:
         printer.send(header + b"".join(pages))
-        deadline = time.time() + 60 + 15 * len(ids)
+        sent = True
+        log_job("sent", bytes=printer.sent_bytes)
+        sent_at = time.time()
+        deadline = sent_at + 60 + 15 * len(ids)
         while time.time() < deadline:
             reply = printer.read_status(timeout=8 if completed else 2)
             if reply is None:
                 if completed:
                     break
+                if not started and time.time() - sent_at > START_TIMEOUT_S:
+                    raise SystemExit(tr("printer did not start printing"))
                 continue
+            log_job("reply", raw=reply.hex(" "))
             if reply[18] == 0x02:
                 raise SystemExit(tr("printer error during printing: {errors}", errors=LOOKUP.error_text(reply)))
+            # A phase change to printing or a completion report shows that the job arrived.
+            if reply[19] == 0x01 or reply[18] == 0x01:
+                started = True
             if reply[18] == 0x01:
                 completed += 1
     except SystemExit as stop:
         # The printer does not report single labels, so only an upper limit is known.
-        reached = labels_handed_over(printer.sent_bytes - len(header), pages)
+        reached = labels_handed_over(printer.sent_bytes - len(header), pages) if started or not sent else 0
+        log_job("stopped", reason=str(stop), reached=reached)
         raise PrinterStopped(str(stop), reached, len(ids)) from None
+    log_job("done", completed=completed)
     print(tr("{completed} completion reports for {count} labels", completed=completed, count=len(ids)))
     if not completed:
         raise SystemExit(tr("no completion status, check the printer"))

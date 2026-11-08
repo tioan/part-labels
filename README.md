@@ -92,6 +92,10 @@ shown count or enter your own. If a different tape is loaded, it asks whether to
 its standard size. Remaining strips of `5x100` follow afterwards. At a real end of tape, the reset command did
 not get through; a short press on the printer's power button cleared the error.
 
+After sending, the printer has to report the start of printing within 15 seconds. Otherwise the script stops
+the same way and offers a new job. The printer's replies stay in the local `strips/print-log.jsonl`, which helps
+to explain a failed job. A few large jobs after a real tape end did not print, and the cause is still open.
+
 Without `--tape`, the script shows the detected tape and asks for confirmation (`[Y/n]`, Enter
 means yes). With `--tape`, printing stops if the loaded tape width does not match. `labels.py print-test-strip`,
 `generate-test-strips` and `verify-test-strips` handle the test strips in `strips/`, which compare code

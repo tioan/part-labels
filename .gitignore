@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .venv/
 strips/issued.jsonl
+strips/print-log.jsonl

@@ -13,6 +13,7 @@ DE = {
     ),
     "PT-P900W not found on USB": "PT-P900W per USB nicht gefunden",
     "no status reply from printer": "keine Statusantwort vom Drucker",
+    "printer did not start printing": "Drucker hat den Druck nicht gestartet",
     "Tape needed: about {strip} per strip, {total} in total": "Bandbedarf: etwa {strip} pro Streifen, {total} insgesamt",
     "Tape needed: about {total}": "Bandbedarf: etwa {total}",
     "printing {count} labels ...": "drucke {count} Etiketten ...",

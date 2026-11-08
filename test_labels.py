@@ -77,6 +77,41 @@ class StripsTest(unittest.TestCase):
         self.assertIn("nothing printed", error)
 
 
+class PrintStartTest(unittest.TestCase):
+    def run_series(self, replies):
+        printer = mock.MagicMock()
+        printer.read_status.side_effect = replies
+
+        def send(data):
+            printer.sent_bytes = len(data)
+
+        printer.send.side_effect = send
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(labels, "STRIPS", labels.Path(folder)), mock.patch.object(
+            labels, "START_TIMEOUT_S", -1
+        ), mock.patch.object(labels, "label_image"), mock.patch.object(
+            labels, "label_page", return_value=b"p" * 100
+        ), mock.patch("builtins.print"):
+            labels.print_series(printer, 12, [10, 10], True)
+            return (labels.Path(folder) / "print-log.jsonl").read_text()
+
+    def test_missing_start_stops_and_counts_nothing_as_printed(self):
+        with self.assertRaises(labels.PrinterStopped) as stopped:
+            self.run_series([None])
+        self.assertIn("did not start", stopped.exception.reason)
+        self.assertEqual((stopped.exception.reached, stopped.exception.count), (0, 2))
+
+    def test_started_job_waits_for_its_completion(self):
+        log = self.run_series([status(b18=0x06, b19=0x01), None, None, status(b18=0x01, b19=0x01), None])
+        self.assertIn('"event": "done", "completed": 1', log)
+        self.assertIn('"event": "reply"', log)
+
+    def test_error_after_start_counts_what_was_sent(self):
+        with self.assertRaises(labels.PrinterStopped) as stopped:
+            self.run_series([status(b18=0x06, b19=0x01), status(b8=0x02, b18=0x02)])
+        self.assertEqual(stopped.exception.reached, 2)
+        self.assertIn("End of media", stopped.exception.reason)
+
+
 class TapeLengthTest(unittest.TestCase):
     def test_half_cut_strip(self):
         # 100 labels of 168 dots (11.85 mm) plus the leader on 12 mm tape.
