@@ -32,6 +32,8 @@ TAPES = {
     9: (219, 106, 128),
     12: (197, 150, 170),
     18: (155, 234, 256),
+    24: (112, 320, 340),
+    36: (45, 454, 512),
 }
 
 # kind -> zint arguments, modules per side, required quiet zone in modules.
@@ -56,8 +58,9 @@ STANDARD = {
     9: ("DM", 7),
     12: ("DM", 10),
     18: ("DM", 15),
+    24: ("DM", 21),
+    36: ("DM", 32),
 }
-DEFAULT_TAPE = 12
 MIN_RASTER_LINES = 57  # 4 mm, the minimum label length for TZe tape
 MIN_MARGIN_DOTS = 14  # 1 mm, the minimum feed margin
 
@@ -175,15 +178,19 @@ def print_job(strip, tape: int) -> bytes:
     )
 
 
-def label_image(tape: int, value: str):
-    """Return a code-only label; the 1 mm cut margin serves as quiet zone along the tape."""
+def label_image(tape: int, value: str, dots: int):
+    """Return a code-only Data Matrix label; the 1 mm cut margin counts toward the quiet zone."""
     from PIL import Image
 
-    kind, dots = STANDARD[tape]
-    _, pins, _ = TAPES[tape]
-    _, modules, _ = KINDS[kind]
+    kind = "DM"
+    _, pins, tape_dots = TAPES[tape]
+    _, modules, quiet = KINDS[kind]
     code_dots = modules * dots
-    width = max(code_dots, MIN_RASTER_LINES)
+    if code_dots > pins or code_dots + 2 * quiet * dots > tape_dots:
+        raise SystemExit(f"{dots} dots per module do not fit {tape} mm tape with a full quiet zone")
+    # Above 14 dots per module the 1 mm cut margin alone is narrower than the quiet zone.
+    quiet_padding = max(quiet * dots - MIN_MARGIN_DOTS, 0)
+    width = max(code_dots + 2 * quiet_padding, MIN_RASTER_LINES)
     label = Image.new("L", (width, pins), 255)
     code = code_matrix(kind, value).resize((code_dots, code_dots), Image.NEAREST)
     label.paste(code, ((width - code_dots) // 2, (pins - code_dots) // 2))
@@ -345,6 +352,19 @@ def cmd_print(args) -> None:
         raise SystemExit("no completion status within 120 s, check the printer")
 
 
+def confirm_tape(tape: int, kind: str, dots: int, count: int) -> None:
+    """Ask before printing, since an auto-detected tape may be a leftover cassette."""
+    _, modules, _ = KINDS[kind]
+    code_mm = modules * dots * 25.4 / DPI
+    print(f"Detected {tape} mm tape: {count} x {kind}, module {module_mm(dots):.2f} mm, code {code_mm:.1f} mm")
+    try:
+        answer = input("Is this the tape you want? [Y/n] ").strip().lower()
+    except EOFError:
+        raise SystemExit("no answer available, nothing printed") from None
+    if answer not in ("", "y", "yes"):
+        raise SystemExit("cancelled, nothing printed")
+
+
 def cmd_labels(args) -> None:
     """Print a series of cut labels; IDs are logged before anything is sent."""
     with Printer() as printer:
@@ -355,36 +375,59 @@ def cmd_labels(args) -> None:
         tape = status[10]
         if tape not in STANDARD:
             raise SystemExit(f"no standard label defined for {tape} mm tape")
-        if args.tape != tape:
-            raise SystemExit(f"{tape} mm tape loaded, {args.tape} mm requested, nothing printed")
         kind, dots = STANDARD[tape]
-        ids = [new_id() for _ in range(args.count)]
-        STRIPS.mkdir(exist_ok=True)
-        with (STRIPS / "issued.jsonl").open("a") as log:
-            for value in ids:
-                log.write(json.dumps({"id": value, "kind": kind, "tape_mm": tape, "dots_per_module": dots}) + "\n")
-        # The printer reports no completion for a page ended by FF, so the job goes out in one piece.
+        if args.tape is None:
+            confirm_tape(tape, kind, dots, args.count)
+        elif args.tape != tape:
+            raise SystemExit(f"{tape} mm tape loaded, {args.tape} mm requested, nothing printed")
         # Half cuts save tape, since every full cut costs about 20 mm of blank tape.
-        half_cut = len(ids) > 1 and not args.full_cut
-        pages = [label_page(label_image(tape, value), tape, i, len(ids), half_cut) for i, value in enumerate(ids)]
-        printer.send(b"\x00" * 200 + b"\x1b@" + b"".join(pages))
-        deadline = time.time() + 60 + 15 * len(ids)
-        completed = 0
-        while time.time() < deadline:
-            reply = printer.read_status(timeout=8 if completed else 2)
-            if reply is None:
-                if completed:
-                    break
-                continue
-            if reply[18] == 0x02:
-                raise SystemExit(f"printer error: {describe(reply)}")
-            if reply[18] == 0x01:
-                completed += 1
-        print(f"{completed} completion reports for {len(ids)} labels")
-        if not completed:
-            raise SystemExit("no completion status, check the printer")
-        for value in ids:
-            print("issued:", value)
+        half_cut = args.count > 1 and not args.full_cut
+        print_series(printer, tape, [dots] * args.count, half_cut)
+
+
+def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) -> None:
+    """Log the IDs, then print one label per entry with the given dots per module."""
+    kind = "DM"
+    ids = [new_id() for _ in dots_per_label]
+    STRIPS.mkdir(exist_ok=True)
+    with (STRIPS / "issued.jsonl").open("a") as log:
+        for value, dots in zip(ids, dots_per_label):
+            log.write(json.dumps({"id": value, "kind": kind, "tape_mm": tape, "dots_per_module": dots}) + "\n")
+    # The printer reports no completion for a page ended by FF, so the job goes out in one piece.
+    pages = [
+        label_page(label_image(tape, value, dots), tape, i, len(ids), half_cut)
+        for i, (value, dots) in enumerate(zip(ids, dots_per_label))
+    ]
+    printer.send(b"\x00" * 200 + b"\x1b@" + b"".join(pages))
+    deadline = time.time() + 60 + 15 * len(ids)
+    completed = 0
+    while time.time() < deadline:
+        reply = printer.read_status(timeout=8 if completed else 2)
+        if reply is None:
+            if completed:
+                break
+            continue
+        if reply[18] == 0x02:
+            raise SystemExit(f"printer error: {describe(reply)}")
+        if reply[18] == 0x01:
+            completed += 1
+    print(f"{completed} completion reports for {len(ids)} labels")
+    if not completed:
+        raise SystemExit("no completion status, check the printer")
+    for value, dots in zip(ids, dots_per_label):
+        print(f"issued: {value} ({module_mm(dots):.2f} mm module)")
+
+
+def cmd_probe(args) -> None:
+    """Print one half-cut Data Matrix label per given module size on the required tape."""
+    with Printer() as printer:
+        status = printer.status()
+        print("before:", describe(status))
+        if status[8] or status[9]:
+            raise SystemExit("printer reports an error, nothing printed")
+        if status[10] != args.tape:
+            raise SystemExit(f"{status[10]} mm tape loaded, {args.tape} mm requested, nothing printed")
+        print_series(printer, args.tape, args.dots, len(args.dots) > 1)
 
 
 def main() -> None:
@@ -398,9 +441,15 @@ def main() -> None:
     print_parser.set_defaults(func=cmd_print)
     labels_parser = commands.add_parser("labels")
     labels_parser.add_argument("count", type=int)
-    labels_parser.add_argument("--tape", type=int, choices=sorted(STANDARD), default=DEFAULT_TAPE)
+    labels_parser.add_argument(
+        "--tape", type=int, choices=sorted(STANDARD), help="required tape width; without it, confirm the detected tape"
+    )
     labels_parser.add_argument("--full-cut", action="store_true", help="full cut after every label instead of half cuts")
     labels_parser.set_defaults(func=cmd_labels)
+    probe_parser = commands.add_parser("probe", help="print one label per module size")
+    probe_parser.add_argument("tape", type=int, choices=sorted(STANDARD))
+    probe_parser.add_argument("dots", type=int, nargs="+", help="dots per module, one value per label")
+    probe_parser.set_defaults(func=cmd_probe)
     args = parser.parse_args()
     args.func(args)
 
