@@ -2,12 +2,15 @@
 """Find label IDs in photos: a direct zxing-cpp pass, then tiled and preprocessed passes."""
 import json
 import re
-import sys
 from pathlib import Path
 
 import zxingcpp
 from PIL import Image, ImageFilter, ImageOps
 from pillow_heif import register_heif_opener
+
+import i18n
+from cli import HelpParser, add_language_option
+from i18n import number, tr
 
 register_heif_opener()
 
@@ -73,19 +76,45 @@ def read_image(image: Image.Image) -> dict:
 
 
 def main() -> None:
+    arguments = i18n.init()
+    parser = HelpParser(
+        description=tr("""Find label IDs in photos and print them, without saving anything.
+
+Runs a direct pass, then tiled and preprocessed passes. A large photo takes about 40 seconds.
+To index a whole folder and sort its photos by part, use sort_photos.py instead."""),
+        epilog=tr("""example:
+  uv run read_photo.py IMG_1505.HEIC IMG_1506.jpg"""),
+    )
+    add_language_option(parser)
+    parser.add_argument("photos", nargs="+", metavar=tr("photo"), help=tr("HEIC, JPEG, PNG, TIFF or WebP file"))
+    args = parser.parse_args(arguments)
     known = load_known()
-    for name in sys.argv[1:]:
+    for name in args.photos:
         image = ImageOps.exif_transpose(Image.open(name)).convert("RGB")
         found = read_image(image)
         direct = sum(1 for how, _ in found.values() if how == "direct")
-        print(f"{Path(name).name}: {image.width}x{image.height}, {len(found)} IDs, {direct} direct")
+        print(
+            tr(
+                "{name}: {width}x{height}, {found} IDs, {direct} direct",
+                name=Path(name).name,
+                width=image.width,
+                height=image.height,
+                found=len(found),
+                direct=direct,
+            )
+        )
         for value, (how, px) in sorted(found.items()):
             entry = known.get(value)
             if entry:
-                label = f"{entry['kind']} {entry['dots_per_module']} dots on {entry['tape_mm']} mm"
+                label = tr(
+                    "{kind} {dots} dots on {tape} mm",
+                    kind=entry["kind"],
+                    dots=entry["dots_per_module"],
+                    tape=entry["tape_mm"],
+                )
             else:
-                label = "unknown ID"
-            size = f"{px:.1f} px/module" if px else "size unknown"
+                label = tr("unknown ID")
+            size = tr("{px} px/module", px=number(px, 1)) if px else tr("size unknown")
             print(f"  {value}  {label}  {how}  {size}")
 
 

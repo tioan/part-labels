@@ -75,12 +75,31 @@ Photos already in the index are skipped; use `--rescan` to read them again. Link
 original path, so rescan after moving the photos. Only the given folder is read, not subfolders.
 A 24 MP photo takes about 40 seconds. Keep the output out of this public repository.
 
+`status` and printer errors are explained in plain text from the tables in `docs/`. `status --raw` also
+shows the raw bytes.
+
 Without `--tape`, the script shows the detected tape and asks for confirmation (`[Y/n]`, Enter
-means yes). With `--tape`, printing stops if the loaded tape width does not match. `labels.py generate`, `verify` and
-`print` handle the comparison test strips in `strips/`.
+means yes). With `--tape`, printing stops if the loaded tape width does not match. `labels.py print-test-strip`,
+`generate-test-strips` and `verify-test-strips` handle the test strips in `strips/`, which compare code
+sizes and are not real labels.
+
+## Language
+
+All output and help texts are available in English and German. The first match decides:
+
+1. `--lang en` or `--lang de`, at any position
+2. the `PART_LABELS_LANG` environment variable
+3. the system language: `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, `LANG`, and on macOS without those
+   the system setting
+4. English
+
+`strips/`, `index.csv` and the `method` column stay in English, so that other tools can read them.
+Run the tests with `uv run python -m unittest`.
 
 ## Sources
 
+- Meaning of all status reply values: [English](docs/brother-pt-p900w-status.md),
+  [Deutsch](docs/brother-pt-p900w-status.de.md).
 - Brother Raster Command Reference for PT-P900/P900W/P950NW/P910BT, v1.02:
   https://download.brother.com/welcome/docp100407/cv_ptp900_jpn_raster_102.pdf
 - ptouch-print by Dominic Radermacher (GPL-3.0), raster line bit layout, commit 3e026ef:

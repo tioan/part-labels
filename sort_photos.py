@@ -4,7 +4,6 @@
 Originals are only read. The output holds index.csv and symbolic links, so deleting it never
 touches a photo. Photos already in the index are skipped unless --rescan is given.
 """
-import argparse
 import csv
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -12,6 +11,9 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+import i18n
+from cli import HelpParser, add_language_option, positive_int
+from i18n import tr
 from read_photo import load_known, read_image
 
 EXTENSIONS = {".heic", ".heif", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
@@ -64,16 +66,26 @@ def rebuild_links(output: Path, rows: list[dict]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("photos", type=Path, help="folder with photos, not searched recursively")
-    parser.add_argument("--out", type=Path, help="output folder, default <photos>-sorted next to the photo folder")
-    parser.add_argument("--rescan", action="store_true", help="scan photos again that are already in the index")
-    parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1), help="photos scanned in parallel")
-    args = parser.parse_args()
+    arguments = i18n.init()
+    parser = HelpParser(
+        description=tr("""Index a folder of photos by label ID and link them into one folder per part.
+
+Writes index.csv, parts/<id>/ and unmatched/ with symbolic links, and only reads the originals.
+A photo with several labels appears in several folders. Photos already in the index are skipped."""),
+        epilog=tr("""example:
+  uv run sort_photos.py ~/Pictures/parts
+  uv run sort_photos.py ~/Pictures/parts --out ~/Pictures/parts-index --rescan"""),
+    )
+    add_language_option(parser)
+    parser.add_argument("photos", type=Path, help=tr("folder with photos, not searched recursively"))
+    parser.add_argument("--out", type=Path, help=tr("output folder, default <photos>-sorted next to the photo folder"))
+    parser.add_argument("--rescan", action="store_true", help=tr("scan photos again that are already in the index"))
+    parser.add_argument("--jobs", type=positive_int, default=min(4, os.cpu_count() or 1), help=tr("photos scanned in parallel"))
+    args = parser.parse_args(arguments)
 
     photo_dir = args.photos.expanduser().resolve()
     if not photo_dir.is_dir():
-        raise SystemExit(f"{photo_dir} is not a folder")
+        raise SystemExit(tr("{path} is not a folder", path=photo_dir))
     output = (args.out.expanduser().resolve() if args.out else photo_dir.with_name(f"{photo_dir.name}-sorted"))
     output.mkdir(parents=True, exist_ok=True)
     index_path = output / "index.csv"
@@ -86,7 +98,7 @@ def main() -> None:
         rows = []
     done = {row["photo"] for row in rows}
     todo = [p for p in photos if str(p) not in done]
-    print(f"{len(photos)} photos, {len(todo)} to scan")
+    print(tr("{photos} photos, {todo} to scan", photos=len(photos), todo=len(todo)))
 
     known = load_known()
     failed = 0
@@ -97,7 +109,7 @@ def main() -> None:
             if error:
                 # Not added to the index, so the next run tries this photo again.
                 failed += 1
-                print(f"[{number}/{len(todo)}] {path.name}: FAILED {error}")
+                print(tr("[{number}/{total}] {name}: FAILED {error}", number=number, total=len(todo), name=path.name, error=error))
                 continue
             for value, (how, px) in sorted(found.items()):
                 rows.append(
@@ -111,7 +123,7 @@ def main() -> None:
                 )
             if not found:
                 rows.append({"photo": str(path), "id": "", "method": "", "px_per_module": "", "known": ""})
-            print(f"[{number}/{len(todo)}] {path.name}: {len(found)} IDs")
+            print(tr("[{number}/{total}] {name}: {count} IDs", number=number, total=len(todo), name=path.name, count=len(found)))
             # Saved after each photo, so an interrupted batch keeps its progress.
             write_index(index_path, rows)
 
@@ -120,8 +132,16 @@ def main() -> None:
     parts = {row["id"] for row in rows if row["id"]}
     unmatched = sum(1 for row in rows if not row["id"])
     unknown = {row["id"] for row in rows if row["known"] == "no"}
-    print(f"{len(parts)} parts, {unmatched} photos without ID, {failed} failed, {len(unknown)} IDs not in the print log")
-    print(f"output: {output}")
+    print(
+        tr(
+            "{parts} parts, {unmatched} photos without ID, {failed} failed, {unknown} IDs not in the print log",
+            parts=len(parts),
+            unmatched=unmatched,
+            failed=failed,
+            unknown=len(unknown),
+        )
+    )
+    print(tr("output: {path}", path=output))
     if failed:
         raise SystemExit(1)
 

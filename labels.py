@@ -11,11 +11,15 @@ https://git.familie-radermacher.ch/linux/ptouch-print.git
 ptouch-print itself does not list the PT-P900W and documents that printers above
 180 dpi are not supported correctly, so it is not used here.
 """
-import argparse
 import json
 import secrets
 import time
 from pathlib import Path
+
+import i18n
+from cli import HelpParser, add_language_option, positive_int
+from i18n import number, tr
+from printer_status import StatusLookup
 
 DPI = 360
 HEAD_PINS = 560
@@ -66,6 +70,7 @@ MIN_RASTER_LINES = 57  # 4 mm, the minimum label length for TZe tape
 MIN_MARGIN_DOTS = 14  # 1 mm, the minimum feed margin
 
 STRIPS = Path(__file__).parent / "strips"
+LOOKUP = StatusLookup()
 
 
 def module_mm(dots: int) -> float:
@@ -192,7 +197,7 @@ def label_image(tape: int, value: str, dots: int):
     _, modules, quiet = KINDS[kind]
     code_dots = modules * dots
     if code_dots > pins or code_dots + 2 * quiet * dots > tape_dots:
-        raise SystemExit(f"{dots} dots per module do not fit {tape} mm tape with a full quiet zone")
+        raise SystemExit(tr("{dots} dots per module do not fit {tape} mm tape with a full quiet zone", dots=dots, tape=tape))
     # Above 14 dots per module the 1 mm cut margin alone is narrower than the quiet zone.
     quiet_padding = max(quiet * dots - MIN_MARGIN_DOTS, 0)
     width = max(code_dots + 2 * quiet_padding, MIN_RASTER_LINES)
@@ -233,7 +238,7 @@ class Printer:
         backend = libusb_package.get_libusb1_backend()
         self.dev = usb.core.find(idVendor=USB_VENDOR, idProduct=USB_PRODUCT, backend=backend)
         if self.dev is None:
-            raise SystemExit("PT-P900W not found on USB")
+            raise SystemExit(tr("PT-P900W not found on USB"))
         self.intf = self.dev.get_active_configuration()[(0, 0)]
         usb.util.claim_interface(self.dev, self.intf)
         direction = usb.util.endpoint_direction
@@ -270,7 +275,7 @@ class Printer:
             # Status type 0x00 marks the reply to a status request.
             if status is not None and status[18] == 0x00:
                 return status
-        raise SystemExit("no status reply from printer")
+        raise SystemExit(tr("no status reply from printer"))
 
     def send(self, data: bytes) -> None:
         for start in range(0, len(data), 16384):
@@ -278,11 +283,12 @@ class Printer:
 
 
 def describe(status: bytes) -> str:
-    return (
-        f"width={status[10]} mm, media=0x{status[11]:02x}, tape color=0x{status[24]:02x}, "
-        f"text color=0x{status[25]:02x}, errors=0x{status[8]:02x}/0x{status[9]:02x}, "
-        f"status type=0x{status[18]:02x}, phase=0x{status[19]:02x}"
-    )
+    return LOOKUP.line(status)
+
+
+def require_no_error(status: bytes) -> None:
+    if status[8] or status[9]:
+        raise SystemExit(tr("printer error, nothing printed: {errors}", errors=LOOKUP.error_text(status)))
 
 
 def cmd_generate(_args) -> None:
@@ -293,12 +299,13 @@ def cmd_generate(_args) -> None:
     existing = {e["tape_mm"] for e in all_entries}
     for tape in GRID:
         if tape in existing:
-            print(f"{tape} mm: kept")
+            print(tr("{tape} mm: kept", tape=tape))
             continue
         strip, manifest = build_strip(tape)
         strip.save(STRIPS / f"strip-{tape}mm.png", dpi=(DPI, DPI))
         all_entries += manifest
-        print(f"{tape} mm: {len(manifest)} codes, length {strip.width * 25.4 / DPI:.0f} mm")
+        length = number(strip.width * 25.4 / DPI, 0)
+        print(tr("{tape} mm: {codes} codes, length {length} mm", tape=tape, codes=len(manifest), length=length))
     manifest_path.write_text(json.dumps(all_entries, indent=2) + "\n")
 
 
@@ -316,7 +323,7 @@ def cmd_verify(_args) -> None:
         canvas.paste(strip, (40, 40 + (TAPES[tape][2] - strip.height) // 2))
         variants = {
             "1:1": canvas,
-            "rotated+blur": canvas.rotate(5, resample=Image.BICUBIC, fillcolor=255, expand=True).filter(
+            tr("rotated+blur"): canvas.rotate(5, resample=Image.BICUBIC, fillcolor=255, expand=True).filter(
                 ImageFilter.GaussianBlur(1.0)
             ),
         }
@@ -324,13 +331,23 @@ def cmd_verify(_args) -> None:
             found = {r.text for r in zxingcpp.read_barcodes(img)}
             missing = expected - found
             failed += len(missing)
-            print(f"{tape} mm {name}: {len(expected & found)}/{len(expected)} found", sorted(missing) or "")
+            summary = tr(
+                "{tape} mm {variant}: {found}/{expected} found",
+                tape=tape,
+                variant=name,
+                found=len(expected & found),
+                expected=len(expected),
+            )
+            print(summary, sorted(missing) or "")
     raise SystemExit(1 if failed else 0)
 
 
-def cmd_status(_args) -> None:
+def cmd_status(args) -> None:
     with Printer() as printer:
-        print(describe(printer.status()))
+        status = printer.status()
+    if args.raw:
+        print(status.hex(" "))
+    print(LOOKUP.report(status))
 
 
 def cmd_print(args) -> None:
@@ -340,54 +357,62 @@ def cmd_print(args) -> None:
     strip = Image.open(STRIPS / f"strip-{tape}mm.png").convert("1")
     with Printer() as printer:
         status = printer.status()
-        print("before:", describe(status))
-        if status[8] or status[9]:
-            raise SystemExit("printer reports an error, nothing printed")
+        print(tr("before:"), describe(status))
+        require_no_error(status)
         if status[10] != tape:
-            raise SystemExit(f"{status[10]} mm tape loaded, {tape} mm needed, nothing printed")
+            raise SystemExit(tr("{loaded} mm tape loaded, {needed} mm needed, nothing printed", loaded=status[10], needed=tape))
         printer.send(print_job(strip, tape))
         deadline = time.time() + 120
         while time.time() < deadline:
             reply = printer.read_status(timeout=2)
             if reply is None:
                 continue
-            print("printer:", describe(reply))
+            print(tr("printer:"), describe(reply))
             if reply[18] == 0x02:
-                raise SystemExit("printer reported an error during printing")
+                raise SystemExit(tr("printer error during printing: {errors}", errors=LOOKUP.error_text(reply)))
             if reply[18] == 0x01:
-                print("print complete")
+                print(tr("print complete"))
                 return
-        raise SystemExit("no completion status within 120 s, check the printer")
+        raise SystemExit(tr("no completion status within 120 s, check the printer"))
 
 
 def confirm_tape(tape: int, kind: str, dots: int, count: int) -> None:
     """Ask before printing, since an auto-detected tape may be a leftover cassette."""
     _, modules, _ = KINDS[kind]
     code_mm = modules * dots * 25.4 / DPI
-    print(f"Detected {tape} mm tape: {count} x {kind}, module {module_mm(dots):.2f} mm, code {code_mm:.1f} mm")
+    print(
+        tr(
+            "Detected {tape} mm tape: {count} x {kind}, module {module} mm, code {code} mm",
+            tape=tape,
+            count=count,
+            kind=kind,
+            module=number(module_mm(dots), 2),
+            code=number(code_mm, 1),
+        )
+    )
     try:
-        answer = input("Is this the tape you want? [Y/n] ").strip().lower()
+        answer = input(tr("Is this the tape you want? [Y/n] ")).strip().lower()
     except EOFError:
-        raise SystemExit("no answer available, nothing printed") from None
-    if answer not in ("", "y", "yes"):
-        raise SystemExit("cancelled, nothing printed")
+        raise SystemExit(tr("no answer available, nothing printed")) from None
+    # Both languages accept both answers, so a habit from the other language cannot cancel a job.
+    if answer not in ("", "y", "yes", "j", "ja"):
+        raise SystemExit(tr("cancelled, nothing printed"))
 
 
 def cmd_labels(args) -> None:
     """Print a series of cut labels; IDs are logged before anything is sent."""
     with Printer() as printer:
         status = printer.status()
-        print("before:", describe(status))
-        if status[8] or status[9]:
-            raise SystemExit("printer reports an error, nothing printed")
+        print(tr("before:"), describe(status))
+        require_no_error(status)
         tape = status[10]
         if tape not in STANDARD:
-            raise SystemExit(f"no standard label defined for {tape} mm tape")
+            raise SystemExit(tr("no standard label defined for {tape} mm tape", tape=tape))
         kind, dots = STANDARD[tape]
         if args.tape is None:
             confirm_tape(tape, kind, dots, args.count)
         elif args.tape != tape:
-            raise SystemExit(f"{tape} mm tape loaded, {args.tape} mm requested, nothing printed")
+            raise SystemExit(tr("{loaded} mm tape loaded, {requested} mm requested, nothing printed", loaded=tape, requested=args.tape))
         # Half cuts save tape, since every full cut costs about 20 mm of blank tape.
         half_cut = args.count > 1 and not args.full_cut
         print_series(printer, tape, [dots] * args.count, half_cut)
@@ -416,49 +441,131 @@ def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) 
                 break
             continue
         if reply[18] == 0x02:
-            raise SystemExit(f"printer error: {describe(reply)}")
+            raise SystemExit(tr("printer error during printing: {errors}", errors=LOOKUP.error_text(reply)))
         if reply[18] == 0x01:
             completed += 1
-    print(f"{completed} completion reports for {len(ids)} labels")
+    print(tr("{completed} completion reports for {count} labels", completed=completed, count=len(ids)))
     if not completed:
-        raise SystemExit("no completion status, check the printer")
+        raise SystemExit(tr("no completion status, check the printer"))
     for value, dots in zip(ids, dots_per_label):
-        print(f"issued: {value} ({module_mm(dots):.2f} mm module)")
+        print(tr("issued: {value} ({module} mm module)", value=value, module=number(module_mm(dots), 2)))
 
 
 def cmd_probe(args) -> None:
     """Print one half-cut Data Matrix label per given module size on the required tape."""
     with Printer() as printer:
         status = printer.status()
-        print("before:", describe(status))
-        if status[8] or status[9]:
-            raise SystemExit("printer reports an error, nothing printed")
+        print(tr("before:"), describe(status))
+        require_no_error(status)
         if status[10] != args.tape:
-            raise SystemExit(f"{status[10]} mm tape loaded, {args.tape} mm requested, nothing printed")
+            raise SystemExit(tr("{loaded} mm tape loaded, {requested} mm requested, nothing printed", loaded=status[10], requested=args.tape))
         print_series(printer, args.tape, args.dots, len(args.dots) > 1)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("generate").set_defaults(func=cmd_generate)
-    commands.add_parser("verify").set_defaults(func=cmd_verify)
-    commands.add_parser("status").set_defaults(func=cmd_status)
-    print_parser = commands.add_parser("print")
-    print_parser.add_argument("tape", type=int, choices=sorted(GRID))
-    print_parser.set_defaults(func=cmd_print)
-    labels_parser = commands.add_parser("labels")
-    labels_parser.add_argument("count", type=int)
-    labels_parser.add_argument(
-        "--tape", type=int, choices=sorted(STANDARD), help="required tape width; without it, confirm the detected tape"
+    global LOOKUP
+    arguments = i18n.init()
+    LOOKUP = StatusLookup()
+    parser = HelpParser(
+        description=tr("Print small Data Matrix ID labels on a Brother PT-P900W connected over USB."),
+        epilog=tr("""typical use:
+  uv run labels.py status             show the loaded tape, prints nothing
+  uv run labels.py labels 20          print 20 new labels for the loaded tape
+  uv run labels.py labels 20 --tape 9 same, but stop unless 9 mm tape is loaded
+
+run "uv run labels.py <command> --help" for details on a command."""),
     )
-    labels_parser.add_argument("--full-cut", action="store_true", help="full cut after every label instead of half cuts")
+    add_language_option(parser)
+    commands = parser.add_subparsers(dest="command", required=True, metavar=tr("<command>"), title=tr("commands"))
+
+    def add_command(name: str, summary: str, details: str = "", epilog: str = ""):
+        return commands.add_parser(name, help=summary, description=details or summary, epilog=epilog)
+
+    add_command(
+        "labels",
+        tr("print new labels with random IDs (main command)"),
+        tr("""Print new labels with random IDs, in the standard size for the tape.
+
+standard sizes (Data Matrix, module / code size):
+   6 mm  0.28 mm /  4.0 mm   only if nothing larger fits, needs good light
+   9 mm  0.49 mm /  6.9 mm   small parts
+  12 mm  0.71 mm /  9.9 mm   default for most parts
+  18 mm  1.06 mm / 14.8 mm   larger devices, boxes
+  24 mm  1.48 mm / 20.7 mm   cases, crates
+  36 mm  2.26 mm / 31.6 mm   shelves, racks
+
+Several labels get half cuts between them and one full cut at the end, which saves tape.
+Without --tape, the detected tape is shown and you confirm it with [Y/n]."""),
+        tr("""examples:
+  uv run labels.py labels 20
+  uv run labels.py labels 20 --tape 12
+  uv run labels.py labels 5 --full-cut"""),
+    )
+    labels_parser = commands.choices["labels"]
+    labels_parser.add_argument("count", type=positive_int, help=tr("number of labels to print"))
+    labels_parser.add_argument(
+        "--tape",
+        type=int,
+        choices=sorted(STANDARD),
+        help=tr("required tape width in mm; prints without asking, but stops if another tape is loaded"),
+    )
+    labels_parser.add_argument(
+        "--full-cut", action="store_true", help=tr("full cut after every label; each cut wastes about 20 mm of tape")
+    )
     labels_parser.set_defaults(func=cmd_labels)
-    probe_parser = commands.add_parser("probe", help="print one label per module size")
-    probe_parser.add_argument("tape", type=int, choices=sorted(STANDARD))
-    probe_parser.add_argument("dots", type=int, nargs="+", help="dots per module, one value per label")
+
+    status_parser = add_command(
+        "status",
+        tr("show the loaded tape and printer errors, prints nothing"),
+        tr("""Show the printer status in plain text, prints nothing.
+
+The explanations come from the tables in docs/brother-pt-p900w-status*.md."""),
+        tr("""examples:
+  uv run labels.py status
+  uv run labels.py --lang de status
+  uv run labels.py status --raw"""),
+    )
+    status_parser.add_argument("--raw", action="store_true", help=tr("also show the 32 raw reply bytes"))
+    status_parser.set_defaults(func=cmd_status)
+
+    probe_parser = add_command(
+        "probe",
+        tr("print one label per module size, to compare sizes"),
+        tr("""Print one label per given module size, to compare sizes on one tape.
+
+A dot is 0.07 mm, so 10 dots per module mean 0.71 mm. Sizes without a full quiet zone are refused."""),
+        tr("""example:
+  uv run labels.py probe 36 32 24    two labels on 36 mm tape: 2.26 and 1.69 mm"""),
+    )
+    probe_parser.add_argument("tape", type=int, choices=sorted(STANDARD), help=tr("tape width in mm, must be loaded"))
+    probe_parser.add_argument("dots", type=positive_int, nargs="+", help=tr("dots per module, one value per label"))
     probe_parser.set_defaults(func=cmd_probe)
-    args = parser.parse_args()
+
+    print_parser = add_command(
+        "print-test-strip",
+        tr("print a test strip to compare QR and Data Matrix sizes, not for real labels"),
+        tr("""Print the test strip for a tape: several QR and Data Matrix sizes with captions.
+
+The strip always holds the same test IDs from strips/manifest.json, and there is no confirmation.
+Only a full cut at the end; marks on the tape edges show where to cut by hand."""),
+        tr("""example:
+  uv run labels.py print-test-strip 24"""),
+    )
+    print_parser.add_argument("tape", type=int, choices=sorted(GRID), help=tr("tape width in mm, must be loaded"))
+    print_parser.set_defaults(func=cmd_print)
+
+    add_command(
+        "generate-test-strips",
+        tr("create missing test strips in strips/, prints nothing"),
+        tr("Create missing test strips in strips/. Existing strips keep their IDs. Prints nothing."),
+    ).set_defaults(func=cmd_generate)
+    add_command(
+        "verify-test-strips",
+        tr("check the test strip images with the decoder, prints nothing"),
+        tr("Decode the test strip images, also rotated and blurred, and report missing codes. Prints nothing."),
+    ).set_defaults(func=cmd_verify)
+
+    args = parser.parse_args(arguments)
     args.func(args)
 
 
