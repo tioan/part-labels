@@ -70,6 +70,8 @@ STANDARD = {
 }
 MIN_RASTER_LINES = 57  # 4 mm, the minimum label length for TZe tape
 MIN_MARGIN_DOTS = 14  # 1 mm, the minimum feed margin
+MIN_EJECT_MM = 27  # The shortest piece of tape the printer can cut, from the raster reference
+LEADER_MM = 22  # Blank tape before the first label of a job, measured on a photo of 6 mm tape
 PRINT_WRITE_TIMEOUT_MS = 30000
 STATUS_WRITE_TIMEOUT_MS = 5000
 
@@ -204,6 +206,26 @@ def print_job(strip, tape: int) -> bytes:
     )
 
 
+def label_raster_lines(dots: int) -> int:
+    """Return the printed length of a Data Matrix label in dots, without the cut margins."""
+    _, modules, quiet = KINDS["DM"]
+    # Above 14 dots per module the 1 mm cut margin alone is narrower than the quiet zone.
+    quiet_padding = max(quiet * dots - MIN_MARGIN_DOTS, 0)
+    return max(modules * dots + 2 * quiet_padding, MIN_RASTER_LINES)
+
+
+def strip_length_mm(dots: int, count: int, full_cut: bool) -> float:
+    """Estimate the tape of one strip, including blank tape from the printer's cutter position."""
+    label_mm = (label_raster_lines(dots) + 2 * MIN_MARGIN_DOTS) * 25.4 / DPI
+    if full_cut:
+        return count * max(label_mm, MIN_EJECT_MM)
+    return max(count * label_mm + LEADER_MM, MIN_EJECT_MM)
+
+
+def format_length(mm: float) -> str:
+    return f"{number(mm / 1000, 1)} m" if mm >= 1000 else f"{mm / 10:.0f} cm"
+
+
 def label_image(tape: int, value: str, dots: int):
     """Return a code-only Data Matrix label; the 1 mm cut margin counts toward the quiet zone."""
     from PIL import Image
@@ -214,9 +236,7 @@ def label_image(tape: int, value: str, dots: int):
     code_dots = modules * dots
     if code_dots > pins or code_dots + 2 * quiet * dots > tape_dots:
         raise SystemExit(tr("{dots} dots per module do not fit {tape} mm tape with a full quiet zone", dots=dots, tape=tape))
-    # Above 14 dots per module the 1 mm cut margin alone is narrower than the quiet zone.
-    quiet_padding = max(quiet * dots - MIN_MARGIN_DOTS, 0)
-    width = max(code_dots + 2 * quiet_padding, MIN_RASTER_LINES)
+    width = label_raster_lines(dots)
     label = Image.new("L", (width, pins), 255)
     code = code_matrix(kind, value).resize((code_dots, code_dots), Image.NEAREST)
     label.paste(code, ((width - code_dots) // 2, (pins - code_dots) // 2))
@@ -356,7 +376,6 @@ class Printer:
             chunk = data[start : start + 16384]
             self._write(chunk, PRINT_WRITE_TIMEOUT_MS)
             self.sent_bytes += len(chunk)
-            self._check_for_error()
 
     def _write(self, data: bytes, timeout_ms: int) -> None:
         try:
@@ -364,16 +383,20 @@ class Printer:
         except self.usb_core.USBTimeoutError:
             # A printer in an error state stops taking data, but may still say why.
             self._check_for_error(wait_ms=2000)
-            raise SystemExit(tr("printer stopped accepting data, check the tape and restart the printer")) from None
+            raise SystemExit(tr("printer stopped accepting data, check the tape and press its power button briefly")) from None
         except self.usb_core.USBError as error:
             raise SystemExit(tr("USB connection to the printer failed: {error}", error=error)) from None
 
-    def _check_for_error(self, wait_ms: int = 1) -> None:
-        """Stop on an error the printer reported by itself, and keep other replies for later."""
+    def _check_for_error(self, wait_ms: int) -> None:
+        """Stop on an error the printer reported by itself, and keep other replies for later.
+
+        Only for a blocked write: polling with short reads while sending stopped the printer from
+        printing in testing, although all data was accepted.
+        """
         deadline = time.time() + wait_ms / 1000
         while True:
             try:
-                reply = bytes(self.ep_in.read(32, timeout=max(wait_ms, 1)))
+                reply = bytes(self.ep_in.read(32, timeout=wait_ms))
             except self.usb_core.USBTimeoutError:
                 reply = b""
             except self.usb_core.USBError as error:
@@ -515,6 +538,17 @@ def cmd_labels(args) -> None:
         strips, per_strip = args.count
         if strips > 1:
             print(tr("{strips} strips with {count} labels each", strips=strips, count=per_strip))
+        strip_mm = strip_length_mm(dots, per_strip, args.full_cut or per_strip == 1)
+        if strips > 1:
+            print(
+                tr(
+                    "Tape needed: about {strip} per strip, {total} in total",
+                    strip=format_length(strip_mm),
+                    total=format_length(strips * strip_mm),
+                )
+            )
+        else:
+            print(tr("Tape needed: about {total}", total=format_length(strip_mm)))
         if args.tape is None:
             confirm_tape(tape, kind, dots, strips * per_strip)
         elif args.tape != tape:
@@ -531,7 +565,9 @@ def cmd_labels(args) -> None:
             try:
                 print_series(printer, tape, [dots] * size, size > 1 and not args.full_cut)
             except PrinterStopped as stop:
-                missing = recover(printer, tape, stop)
+                missing, tape = recover(printer, tape, stop)
+                # The rest of the series follows on whichever tape is loaded now.
+                kind, dots = STANDARD[tape]
                 if missing:
                     # The replacement strip takes the place of the stopped one.
                     queue.insert(0, missing)
@@ -548,32 +584,50 @@ def ask(prompt: str) -> str:
         raise SystemExit(tr("no answer available, stopped")) from None
 
 
-def recover(printer, tape: int, stop: PrinterStopped) -> int:
-    """Report a stop, reset the printer on request and return how many labels to print again."""
+def accept_other_tape(loaded: int, needed: int) -> bool:
+    """Offer a different tape after a stop, for when no cassette of the same width is left."""
+    if loaded not in STANDARD:
+        print(tr("no standard label defined for {tape} mm tape", tape=loaded))
+        return False
+    _, dots = STANDARD[loaded]
+    _, modules, _ = KINDS["DM"]
+    answer = ask(
+        tr(
+            "{loaded} mm tape is loaded instead of {needed} mm: module {module} mm, code {code} mm. Continue with it? [Y/n] ",
+            loaded=loaded,
+            needed=needed,
+            module=number(module_mm(dots), 2),
+            code=number(modules * module_mm(dots), 1),
+        )
+    )
+    return answer in YES
+
+
+def recover(printer, tape: int, stop: PrinterStopped) -> tuple[int, int]:
+    """Report a stop, reset the printer on request and return the labels to print and the tape."""
     print(stop.reason)
     print(tr("at most {reached} of {count} labels reached the printer before it stopped", reached=stop.reached, count=stop.count))
     while True:
-        if ask(tr("Replace the tape if needed. Reset the printer now? Nothing is printed yet. [Y/n] ")) not in YES:
+        if ask(tr("Replace the tape if needed and press the printer's power button briefly to clear the error. Continue? Nothing is printed yet. [Y/n] ")) not in YES:
             raise SystemExit(tr("stopped, no further labels printed"))
         status = printer.try_reset()
         if status is None:
-            print(tr("printer does not answer, turn it off and on again"))
+            print(tr("printer does not answer, press its power button briefly, or turn it off and on again"))
         elif status[8] or status[9]:
             print(tr("printer still reports: {errors}", errors=LOOKUP.error_text(status)))
-        elif status[10] != tape:
-            print(tr("{loaded} mm tape loaded, {needed} mm needed", loaded=status[10], needed=tape))
-        else:
+        elif status[10] == tape or accept_other_tape(status[10], tape):
+            tape = status[10]
             break
     print(tr("printer is ready"))
     missing = stop.count - stop.reached
     while True:
         answer = ask(tr("At least {count} labels are missing. Print them as a new job? [Y/n or a number] ", count=missing))
         if answer in YES:
-            return missing
+            return missing, tape
         if answer in ("n", "no", "nein"):
             raise SystemExit(tr("stopped, no further labels printed"))
         if answer.isdecimal():
-            return int(answer)
+            return int(answer), tape
         print(tr("please answer y, n or a number"))
 
 
@@ -626,6 +680,7 @@ def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) 
     ]
     header = b"\x00" * 200 + b"\x1b@"
     printer.sent_bytes = 0
+    print(tr("printing {count} labels ...", count=len(ids)), flush=True)
     completed = 0
     try:
         printer.send(header + b"".join(pages))
@@ -775,7 +830,11 @@ Only a full cut at the end; marks on the tape edges show where to cut by hand.""
     ).set_defaults(func=cmd_verify)
 
     args = parser.parse_args(arguments)
-    args.func(args)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print()
+        raise SystemExit(tr("cancelled; labels already sent may still print, restart the printer if it does not recover")) from None
 
 
 if __name__ == "__main__":

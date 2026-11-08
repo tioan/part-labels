@@ -88,7 +88,9 @@ checks the printer before each further strip and stops on an error or a differen
 If the printer stops, for example at the end of the tape, the script names the reason and how many labels at
 most reached the printer. The printer does not report single labels, so the real number can be lower. It then
 offers to reset the printer and to print the missing labels as a new job with new IDs. You can confirm the
-shown count or enter your own. Remaining strips of `5x100` follow afterwards.
+shown count or enter your own. If a different tape is loaded, it asks whether to continue with that tape in
+its standard size. Remaining strips of `5x100` follow afterwards. At a real end of tape, the reset command did
+not get through; a short press on the printer's power button cleared the error.
 
 Without `--tape`, the script shows the detected tape and asks for confirmation (`[Y/n]`, Enter
 means yes). With `--tape`, printing stops if the loaded tape width does not match. `labels.py print-test-strip`,

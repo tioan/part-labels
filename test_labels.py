@@ -77,6 +77,25 @@ class StripsTest(unittest.TestCase):
         self.assertIn("nothing printed", error)
 
 
+class TapeLengthTest(unittest.TestCase):
+    def test_half_cut_strip(self):
+        # 100 labels of 168 dots (11.85 mm) plus the leader on 12 mm tape.
+        self.assertAlmostEqual(labels.strip_length_mm(10, 100, False), 100 * 168 * 25.4 / 360 + 22)
+
+    def test_short_strip_uses_the_minimum_length(self):
+        self.assertGreaterEqual(labels.strip_length_mm(4, 1, False), labels.MIN_EJECT_MM)
+
+    def test_full_cuts_use_the_minimum_per_label(self):
+        self.assertEqual(labels.strip_length_mm(10, 5, True), 5 * labels.MIN_EJECT_MM)
+
+    def test_quiet_padding_counts_for_large_labels(self):
+        self.assertEqual(labels.label_raster_lines(32), 14 * 32 + 2 * (32 - 14))
+
+    def test_length_format(self):
+        self.assertEqual(labels.format_length(6049), "6.0 m")
+        self.assertEqual(labels.format_length(620), "62 cm")
+
+
 class FakeEndpoint:
     def __init__(self, write_error=None, replies=()):
         self.write_error, self.replies, self.written = write_error, list(replies), []
@@ -144,12 +163,12 @@ class RecoveryTest(unittest.TestCase):
 
     def test_confirmed_reset_offers_the_missing_labels(self):
         result, printer, text = self.recover(["", "y"], [READY])
-        self.assertEqual(result, 27)
+        self.assertEqual(result, (27, 12))
         self.assertIn("at most 73 of 100", text)
         printer.try_reset.assert_called_once()
 
     def test_own_number_replaces_the_estimate(self):
-        self.assertEqual(self.recover(["y", "35"], [READY])[0], 35)
+        self.assertEqual(self.recover(["y", "35"], [READY])[0], (35, 12))
 
     def test_declined_reset_touches_nothing(self):
         result, printer, _ = self.recover(["n"], [READY])
@@ -160,17 +179,27 @@ class RecoveryTest(unittest.TestCase):
         self.assertIn("stopped", self.recover(["y", "n"], [READY])[0])
 
     def test_retries_until_the_printer_is_ready(self):
-        result, printer, text = self.recover(
-            ["y", "y", "y", "y", "y"], [None, status(b8=0x01), status(b10=9), READY]
-        )
-        self.assertEqual(result, 27)
-        self.assertEqual(printer.try_reset.call_count, 4)
-        self.assertIn("turn it off and on", text)
+        result, printer, text = self.recover(["y", "y", "y", "y"], [None, status(b8=0x01), READY])
+        self.assertEqual(result, (27, 12))
+        self.assertEqual(printer.try_reset.call_count, 3)
+        self.assertIn("press its power button", text)
         self.assertIn("No media", text)
-        self.assertIn("9 mm tape loaded", text)
+
+    def test_other_tape_can_be_accepted(self):
+        self.assertEqual(self.recover(["y", "y", "y"], [status(b10=9)])[0], (27, 9))
+
+    def test_declined_other_tape_asks_again(self):
+        result, printer, _ = self.recover(["y", "n", "y", "y"], [status(b10=9), READY])
+        self.assertEqual(result, (27, 12))
+        self.assertEqual(printer.try_reset.call_count, 2)
+
+    def test_tape_without_standard_label_is_refused(self):
+        result, printer, text = self.recover(["y", "y", "y"], [status(b10=4), READY])
+        self.assertEqual(result, (27, 12))
+        self.assertIn("no standard label defined for 4 mm", text)
 
     def test_invalid_answer_asks_again(self):
-        self.assertEqual(self.recover(["y", "maybe", "5"], [READY])[0], 5)
+        self.assertEqual(self.recover(["y", "maybe", "5"], [READY])[0], (5, 12))
 
     def test_no_input_stops(self):
         printer = mock.MagicMock()
@@ -190,9 +219,25 @@ class ContinueAfterStopTest(unittest.TestCase):
         stopped = labels.PrinterStopped("End of media", 73, 100)
         with mock.patch.object(labels, "Printer", fake), mock.patch.object(
             labels, "print_series", side_effect=[stopped, None, None]
-        ) as series, mock.patch.object(labels, "recover", return_value=27), mock.patch("builtins.print"):
+        ) as series, mock.patch.object(labels, "recover", return_value=(27, 12)), mock.patch("builtins.print"):
             labels.cmd_labels(args)
         self.assertEqual([len(call.args[2]) for call in series.call_args_list], [100, 27, 100])
+
+    def test_series_continues_on_the_new_tape(self):
+        printer = mock.MagicMock()
+        ready_9mm = status(b10=9)
+        printer.status.side_effect = [READY, ready_9mm]
+        fake = mock.MagicMock()
+        fake.return_value.__enter__.return_value = printer
+        args = SimpleNamespace(count=(2, 100), tape=12, full_cut=False)
+        stopped = labels.PrinterStopped("End of media", 73, 100)
+        with mock.patch.object(labels, "Printer", fake), mock.patch.object(
+            labels, "print_series", side_effect=[stopped, None, None]
+        ) as series, mock.patch.object(labels, "recover", return_value=(27, 9)), mock.patch("builtins.print"):
+            labels.cmd_labels(args)
+        calls = series.call_args_list
+        self.assertEqual([call.args[1] for call in calls], [12, 9, 9])
+        self.assertEqual(calls[1].args[2], [7] * 27)
 
 
 class ResetTest(unittest.TestCase):
@@ -234,20 +279,14 @@ class SendErrorTest(unittest.TestCase):
     def test_write_timeout_without_reply_gives_advice(self):
         with self.assertRaises(SystemExit) as stop:
             fake_printer(FakeEndpoint(self.TIMEOUT)).send(b"x")
-        self.assertIn("check the tape", str(stop.exception))
+        self.assertIn("press its power button", str(stop.exception))
 
-    def test_error_during_sending_stops_the_rest(self):
-        endpoint = FakeEndpoint(replies=[status(b9=0x10, b18=0x02)])
-        with self.assertRaises(SystemExit) as stop:
-            fake_printer(endpoint).send(b"x" * 40000)
-        self.assertIn("Cover open", str(stop.exception))
-        self.assertEqual(len(endpoint.written), 1)
-
-    def test_other_replies_are_kept_for_later(self):
-        finished = status(b18=0x01)
-        printer = fake_printer(FakeEndpoint(replies=[finished]))
-        printer.send(b"x")
-        self.assertEqual(printer.read_status(timeout=0), finished)
+    def test_sending_does_not_read_from_the_printer(self):
+        endpoint = FakeEndpoint(replies=[status(b18=0x01)])
+        printer = fake_printer(endpoint)
+        printer.send(b"x" * 40000)
+        self.assertEqual(len(endpoint.written), 3)
+        self.assertEqual(len(endpoint.replies), 1)
 
     def test_status_uses_the_short_timeout(self):
         printer = fake_printer(FakeEndpoint(self.TIMEOUT))

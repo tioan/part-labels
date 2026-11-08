@@ -13,14 +13,25 @@ DE = {
     ),
     "PT-P900W not found on USB": "PT-P900W per USB nicht gefunden",
     "no status reply from printer": "keine Statusantwort vom Drucker",
+    "Tape needed: about {strip} per strip, {total} in total": "Bandbedarf: etwa {strip} pro Streifen, {total} insgesamt",
+    "Tape needed: about {total}": "Bandbedarf: etwa {total}",
+    "printing {count} labels ...": "drucke {count} Etiketten ...",
+    "cancelled; labels already sent may still print, restart the printer if it does not recover": (
+        "abgebrochen; bereits gesendete Etiketten können noch gedruckt werden, Drucker bei Bedarf neu starten"
+    ),
     "no answer available, stopped": "keine Antwort möglich, abgebrochen",
-    "Replace the tape if needed. Reset the printer now? Nothing is printed yet. [Y/n] ": (
-        "Band bei Bedarf wechseln. Drucker jetzt quittieren? Es wird noch nichts gedruckt. [J/n] "
+    "Replace the tape if needed and press the printer's power button briefly to clear the error. Continue? Nothing is printed yet. [Y/n] ": (
+        "Band bei Bedarf wechseln und die Power-Taste des Druckers kurz drücken, um den Fehler zu löschen. "
+        "Weiter? Es wird noch nichts gedruckt. [J/n] "
     ),
     "stopped, no further labels printed": "abgebrochen, keine weiteren Etiketten gedruckt",
-    "printer does not answer, turn it off and on again": "Drucker antwortet nicht, bitte aus- und wieder einschalten",
+    "printer does not answer, press its power button briefly, or turn it off and on again": (
+        "Drucker antwortet nicht, bitte Power-Taste kurz drücken oder aus- und wieder einschalten"
+    ),
     "printer still reports: {errors}": "Drucker meldet weiterhin: {errors}",
-    "{loaded} mm tape loaded, {needed} mm needed": "{loaded}-mm-Band eingelegt, {needed} mm benötigt",
+    "{loaded} mm tape is loaded instead of {needed} mm: module {module} mm, code {code} mm. Continue with it? [Y/n] ": (
+        "{loaded}-mm-Band statt {needed} mm eingelegt: Modul {module} mm, Code {code} mm. Damit weitermachen? [J/n] "
+    ),
     "printer is ready": "Drucker ist bereit",
     "At least {count} labels are missing. Print them as a new job? [Y/n or a number] ": (
         "Mindestens {count} Etiketten fehlen. Als neuen Auftrag drucken? [J/n oder eine Zahl] "
@@ -30,8 +41,8 @@ DE = {
         "höchstens {reached} von {count} Etiketten kamen beim Drucker an, bevor er stoppte"
     ),
     "USB connection to the printer failed: {error}": "USB-Verbindung zum Drucker fehlgeschlagen: {error}",
-    "printer stopped accepting data, check the tape and restart the printer": (
-        "Drucker nimmt keine Daten mehr an, bitte Band prüfen und Drucker neu starten"
+    "printer stopped accepting data, check the tape and press its power button briefly": (
+        "Drucker nimmt keine Daten mehr an, bitte Band prüfen und Power-Taste kurz drücken"
     ),
     "printer error, nothing printed: {errors}": "Druckerfehler, nichts gedruckt: {errors}",
     "{tape} mm: kept": "{tape} mm: beibehalten",
