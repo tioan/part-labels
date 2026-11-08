@@ -13,6 +13,26 @@ DE = {
     ),
     "PT-P900W not found on USB": "PT-P900W per USB nicht gefunden",
     "no status reply from printer": "keine Statusantwort vom Drucker",
+    "no answer available, stopped": "keine Antwort möglich, abgebrochen",
+    "Replace the tape if needed. Reset the printer now? Nothing is printed yet. [Y/n] ": (
+        "Band bei Bedarf wechseln. Drucker jetzt quittieren? Es wird noch nichts gedruckt. [J/n] "
+    ),
+    "stopped, no further labels printed": "abgebrochen, keine weiteren Etiketten gedruckt",
+    "printer does not answer, turn it off and on again": "Drucker antwortet nicht, bitte aus- und wieder einschalten",
+    "printer still reports: {errors}": "Drucker meldet weiterhin: {errors}",
+    "{loaded} mm tape loaded, {needed} mm needed": "{loaded}-mm-Band eingelegt, {needed} mm benötigt",
+    "printer is ready": "Drucker ist bereit",
+    "At least {count} labels are missing. Print them as a new job? [Y/n or a number] ": (
+        "Mindestens {count} Etiketten fehlen. Als neuen Auftrag drucken? [J/n oder eine Zahl] "
+    ),
+    "please answer y, n or a number": "bitte mit j, n oder einer Zahl antworten",
+    "at most {reached} of {count} labels reached the printer before it stopped": (
+        "höchstens {reached} von {count} Etiketten kamen beim Drucker an, bevor er stoppte"
+    ),
+    "USB connection to the printer failed: {error}": "USB-Verbindung zum Drucker fehlgeschlagen: {error}",
+    "printer stopped accepting data, check the tape and restart the printer": (
+        "Drucker nimmt keine Daten mehr an, bitte Band prüfen und Drucker neu starten"
+    ),
     "printer error, nothing printed: {errors}": "Druckerfehler, nichts gedruckt: {errors}",
     "{tape} mm: kept": "{tape} mm: beibehalten",
     "{tape} mm: {codes} codes, length {length} mm": "{tape} mm: {codes} Codes, Länge {length} mm",

@@ -70,6 +70,11 @@ STANDARD = {
 }
 MIN_RASTER_LINES = 57  # 4 mm, the minimum label length for TZe tape
 MIN_MARGIN_DOTS = 14  # 1 mm, the minimum feed margin
+PRINT_WRITE_TIMEOUT_MS = 30000
+STATUS_WRITE_TIMEOUT_MS = 5000
+
+# Both languages accept both answers, so a habit from the other language cannot cancel a job.
+YES = ("", "y", "yes", "j", "ja")
 
 STRIPS = Path(__file__).parent / "strips"
 LOOKUP = StatusLookup()
@@ -238,6 +243,14 @@ def label_page(label, tape: int, index: int, total: int, half_cut: bool) -> byte
     )
 
 
+class PrinterStopped(Exception):
+    """A printer stop during a series, with how many labels at most reached the printer."""
+
+    def __init__(self, reason: str, reached: int, count: int):
+        super().__init__(reason)
+        self.reason, self.reached, self.count = reason, reached, count
+
+
 class Printer:
     def __enter__(self):
         import libusb_package
@@ -245,27 +258,75 @@ class Printer:
         import usb.util
 
         self.usb_core, self.usb_util = usb.core, usb.util
+        self.pending: list[bytes] = []
+        self.sent_bytes = 0
         # libusb-package bundles libusb, so no system library is needed.
-        backend = libusb_package.get_libusb1_backend()
-        self.dev = usb.core.find(idVendor=USB_VENDOR, idProduct=USB_PRODUCT, backend=backend)
-        if self.dev is None:
-            raise SystemExit(tr("PT-P900W not found on USB"))
-        self.intf = self.dev.get_active_configuration()[(0, 0)]
-        usb.util.claim_interface(self.dev, self.intf)
-        direction = usb.util.endpoint_direction
-        self.ep_out = usb.util.find_descriptor(
-            self.intf, custom_match=lambda e: direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
-        )
-        self.ep_in = usb.util.find_descriptor(
-            self.intf, custom_match=lambda e: direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN
-        )
+        self.backend = libusb_package.get_libusb1_backend()
+        self._connect()
         return self
 
-    def __exit__(self, *_):
-        self.usb_util.release_interface(self.dev, self.intf)
-        self.usb_util.dispose_resources(self.dev)
+    def _connect(self) -> None:
+        self.dev = self.usb_core.find(idVendor=USB_VENDOR, idProduct=USB_PRODUCT, backend=self.backend)
+        if self.dev is None:
+            raise SystemExit(tr("PT-P900W not found on USB"))
+        try:
+            self.intf = self.dev.get_active_configuration()[(0, 0)]
+            self.usb_util.claim_interface(self.dev, self.intf)
+        except self.usb_core.USBError as error:
+            raise SystemExit(tr("USB connection to the printer failed: {error}", error=error)) from None
+        util = self.usb_util
+        direction = util.endpoint_direction
+        self.ep_out = util.find_descriptor(
+            self.intf, custom_match=lambda e: direction(e.bEndpointAddress) == util.ENDPOINT_OUT
+        )
+        self.ep_in = util.find_descriptor(
+            self.intf, custom_match=lambda e: direction(e.bEndpointAddress) == util.ENDPOINT_IN
+        )
+
+    def _disconnect(self) -> None:
+        try:
+            self.usb_util.release_interface(self.dev, self.intf)
+            self.usb_util.dispose_resources(self.dev)
+        except self.usb_core.USBError:
+            pass  # The connection may already be gone; the original problem matters more.
+
+    def try_reset(self) -> bytes | None:
+        """Clear a stopped printer and return its status, or None if it does not answer.
+
+        Brother documents the reset command that status() sends. The USB reset and the new
+        connection cover a blocked transfer and a printer that was switched off and on.
+        """
+
+        def plain() -> bytes:
+            self.pending.clear()
+            self.dev.clear_halt(self.ep_out)
+            return self.status()
+
+        def after_usb_reset() -> bytes:
+            self.dev.reset()
+            return reconnected()
+
+        def reconnected() -> bytes:
+            self._disconnect()
+            self._connect()
+            self.pending.clear()
+            return self.status()
+
+        for attempt in (plain, after_usb_reset, reconnected):
+            try:
+                return attempt()
+            except (SystemExit, self.usb_core.USBError):
+                continue
+        return None
+
+    def __exit__(self, _type, error, _traceback):
+        self._disconnect()
+        if isinstance(error, self.usb_core.USBError):
+            raise SystemExit(tr("USB connection to the printer failed: {error}", error=error)) from None
 
     def read_status(self, timeout: float = 5.0) -> bytes | None:
+        if self.pending:
+            return self.pending.pop(0)
         data = b""
         deadline = time.time() + timeout
         while len(data) < 32 and time.time() < deadline:
@@ -273,13 +334,15 @@ class Printer:
                 data += bytes(self.ep_in.read(32, timeout=500))
             except self.usb_core.USBTimeoutError:
                 pass
+            except self.usb_core.USBError as error:
+                raise SystemExit(tr("USB connection to the printer failed: {error}", error=error)) from None
         return data[:32] if len(data) >= 32 else None
 
     def status(self) -> bytes:
         # A finished job can leave notifications queued, e.g. with the previous tape width.
         while self.read_status(timeout=0.6) is not None:
             pass
-        self.ep_out.write(b"\x00" * 200 + b"\x1b@" + b"\x1biS")
+        self._write(b"\x00" * 200 + b"\x1b@" + b"\x1biS", STATUS_WRITE_TIMEOUT_MS)
         deadline = time.time() + 5
         while time.time() < deadline:
             status = self.read_status(timeout=1)
@@ -290,7 +353,37 @@ class Printer:
 
     def send(self, data: bytes) -> None:
         for start in range(0, len(data), 16384):
-            self.ep_out.write(data[start : start + 16384], timeout=30000)
+            chunk = data[start : start + 16384]
+            self._write(chunk, PRINT_WRITE_TIMEOUT_MS)
+            self.sent_bytes += len(chunk)
+            self._check_for_error()
+
+    def _write(self, data: bytes, timeout_ms: int) -> None:
+        try:
+            self.ep_out.write(data, timeout=timeout_ms)
+        except self.usb_core.USBTimeoutError:
+            # A printer in an error state stops taking data, but may still say why.
+            self._check_for_error(wait_ms=2000)
+            raise SystemExit(tr("printer stopped accepting data, check the tape and restart the printer")) from None
+        except self.usb_core.USBError as error:
+            raise SystemExit(tr("USB connection to the printer failed: {error}", error=error)) from None
+
+    def _check_for_error(self, wait_ms: int = 1) -> None:
+        """Stop on an error the printer reported by itself, and keep other replies for later."""
+        deadline = time.time() + wait_ms / 1000
+        while True:
+            try:
+                reply = bytes(self.ep_in.read(32, timeout=max(wait_ms, 1)))
+            except self.usb_core.USBTimeoutError:
+                reply = b""
+            except self.usb_core.USBError as error:
+                raise SystemExit(tr("USB connection to the printer failed: {error}", error=error)) from None
+            if len(reply) >= 32:
+                if reply[18] == 0x02:
+                    raise SystemExit(tr("printer error during printing: {errors}", errors=LOOKUP.error_text(reply)))
+                self.pending.append(reply[:32])
+            elif time.time() >= deadline:
+                return
 
 
 def describe(status: bytes) -> str:
@@ -405,8 +498,7 @@ def confirm_tape(tape: int, kind: str, dots: int, count: int) -> None:
         answer = input(tr("Is this the tape you want? [Y/n] ")).strip().lower()
     except EOFError:
         raise SystemExit(tr("no answer available, nothing printed")) from None
-    # Both languages accept both answers, so a habit from the other language cannot cancel a job.
-    if answer not in ("", "y", "yes", "j", "ja"):
+    if answer not in YES:
         raise SystemExit(tr("cancelled, nothing printed"))
 
 
@@ -428,14 +520,61 @@ def cmd_labels(args) -> None:
         elif args.tape != tape:
             raise SystemExit(tr("{loaded} mm tape loaded, {requested} mm requested, nothing printed", loaded=tape, requested=args.tape))
         # Half cuts save tape, since every full cut costs about 20 mm of blank tape.
-        half_cut = per_strip > 1 and not args.full_cut
-        for strip in range(1, strips + 1):
-            if strip > 1:
+        queue = [per_strip] * strips
+        total = strips
+        done = 0
+        while queue:
+            size = queue.pop(0)
+            if done:
                 # The tape may have run out or been changed since the previous strip.
-                require_ready_for_next_strip(printer.status(), tape, strip, strips)
-            print_series(printer, tape, [dots] * per_strip, half_cut)
-            if strips > 1:
-                print(tr("strip {strip}/{strips} printed", strip=strip, strips=strips))
+                require_ready_for_next_strip(printer.status(), tape, done + 1, total)
+            try:
+                print_series(printer, tape, [dots] * size, size > 1 and not args.full_cut)
+            except PrinterStopped as stop:
+                missing = recover(printer, tape, stop)
+                if missing:
+                    # The replacement strip takes the place of the stopped one.
+                    queue.insert(0, missing)
+                continue
+            done += 1
+            if total > 1:
+                print(tr("strip {strip}/{strips} printed", strip=done, strips=total))
+
+
+def ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip().lower()
+    except EOFError:
+        raise SystemExit(tr("no answer available, stopped")) from None
+
+
+def recover(printer, tape: int, stop: PrinterStopped) -> int:
+    """Report a stop, reset the printer on request and return how many labels to print again."""
+    print(stop.reason)
+    print(tr("at most {reached} of {count} labels reached the printer before it stopped", reached=stop.reached, count=stop.count))
+    while True:
+        if ask(tr("Replace the tape if needed. Reset the printer now? Nothing is printed yet. [Y/n] ")) not in YES:
+            raise SystemExit(tr("stopped, no further labels printed"))
+        status = printer.try_reset()
+        if status is None:
+            print(tr("printer does not answer, turn it off and on again"))
+        elif status[8] or status[9]:
+            print(tr("printer still reports: {errors}", errors=LOOKUP.error_text(status)))
+        elif status[10] != tape:
+            print(tr("{loaded} mm tape loaded, {needed} mm needed", loaded=status[10], needed=tape))
+        else:
+            break
+    print(tr("printer is ready"))
+    missing = stop.count - stop.reached
+    while True:
+        answer = ask(tr("At least {count} labels are missing. Print them as a new job? [Y/n or a number] ", count=missing))
+        if answer in YES:
+            return missing
+        if answer in ("n", "no", "nein"):
+            raise SystemExit(tr("stopped, no further labels printed"))
+        if answer.isdecimal():
+            return int(answer)
+        print(tr("please answer y, n or a number"))
 
 
 def require_ready_for_next_strip(status: bytes, tape: int, strip: int, strips: int) -> None:
@@ -461,6 +600,17 @@ def require_ready_for_next_strip(status: bytes, tape: int, strip: int, strips: i
         )
 
 
+def labels_handed_over(sent_bytes: int, pages: list[bytes]) -> int:
+    """Count the pages that were sent completely."""
+    count = 0
+    for page in pages:
+        sent_bytes -= len(page)
+        if sent_bytes < 0:
+            break
+        count += 1
+    return count
+
+
 def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) -> None:
     """Log the IDs, then print one label per entry with the given dots per module."""
     kind = "DM"
@@ -474,19 +624,26 @@ def print_series(printer, tape: int, dots_per_label: list[int], half_cut: bool) 
         label_page(label_image(tape, value, dots), tape, i, len(ids), half_cut)
         for i, (value, dots) in enumerate(zip(ids, dots_per_label))
     ]
-    printer.send(b"\x00" * 200 + b"\x1b@" + b"".join(pages))
-    deadline = time.time() + 60 + 15 * len(ids)
+    header = b"\x00" * 200 + b"\x1b@"
+    printer.sent_bytes = 0
     completed = 0
-    while time.time() < deadline:
-        reply = printer.read_status(timeout=8 if completed else 2)
-        if reply is None:
-            if completed:
-                break
-            continue
-        if reply[18] == 0x02:
-            raise SystemExit(tr("printer error during printing: {errors}", errors=LOOKUP.error_text(reply)))
-        if reply[18] == 0x01:
-            completed += 1
+    try:
+        printer.send(header + b"".join(pages))
+        deadline = time.time() + 60 + 15 * len(ids)
+        while time.time() < deadline:
+            reply = printer.read_status(timeout=8 if completed else 2)
+            if reply is None:
+                if completed:
+                    break
+                continue
+            if reply[18] == 0x02:
+                raise SystemExit(tr("printer error during printing: {errors}", errors=LOOKUP.error_text(reply)))
+            if reply[18] == 0x01:
+                completed += 1
+    except SystemExit as stop:
+        # The printer does not report single labels, so only an upper limit is known.
+        reached = labels_handed_over(printer.sent_bytes - len(header), pages)
+        raise PrinterStopped(str(stop), reached, len(ids)) from None
     print(tr("{completed} completion reports for {count} labels", completed=completed, count=len(ids)))
     if not completed:
         raise SystemExit(tr("no completion status, check the printer"))
@@ -502,7 +659,10 @@ def cmd_probe(args) -> None:
         require_no_error(status)
         if status[10] != args.tape:
             raise SystemExit(tr("{loaded} mm tape loaded, {requested} mm requested, nothing printed", loaded=status[10], requested=args.tape))
-        print_series(printer, args.tape, args.dots, len(args.dots) > 1)
+        try:
+            print_series(printer, args.tape, args.dots, len(args.dots) > 1)
+        except PrinterStopped as stop:
+            raise SystemExit(stop.reason) from None
 
 
 def main() -> None:
