@@ -1,0 +1,16 @@
+[project]
+name = "part-labels"
+version = "0.1.0"
+description = "Small ID labels for identifying parts in photos, printed on a Brother PT-P900W"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "libusb-package>=1.0.26",
+    "pillow>=11",
+    "pyusb>=1.3",
+    "zint-bindings>=1.2",
+    "zxing-cpp>=2.3",
+]
+
+[tool.uv]
+package = false

@@ -14,8 +14,6 @@ ptouch-print itself does not list the PT-P900W and documents that printers above
 import argparse
 import json
 import secrets
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -36,10 +34,11 @@ TAPES = {
     36: (45, 454, 512),
 }
 
-# kind -> zint arguments, modules per side, required quiet zone in modules.
+# kind -> zint symbol settings, modules per side, required quiet zone in modules.
+# QR: version 1 with error correction H. Data Matrix: square 14x14.
 KINDS = {
-    "QR": (["-b", "58", "--vers=1", "--secure=4"], 21, 4),
-    "DM": (["-b", "71", "--vers=3", "--square"], 14, 1),
+    "QR": (("QRCODE", 4, 1), 21, 4),
+    "DM": (("DATAMATRIX", -1, 3), 14, 1),
 }
 
 # Test grid: tape mm -> (kind, dots per module). Every entry keeps the full quiet
@@ -77,17 +76,21 @@ def new_id() -> str:
 
 def code_matrix(kind: str, value: str):
     """Return the code as a modules x modules 8-bit image, 0 = black."""
+    import zint
     from PIL import Image
 
-    args, modules, _ = KINDS[kind]
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "code.png"
-        subprocess.run(["zint", *args, "-d", value, "--scale=1", "--nobackground", "-o", str(path)], check=True)
-        src = Image.open(path).convert("RGBA")
-        flat = Image.new("RGB", src.size, "white")
-        flat.paste(src, mask=src.split()[3])
-    bbox = flat.convert("L").point(lambda p: 255 if p < 128 else 0).getbbox()
-    return flat.crop(bbox).convert("L").resize((modules, modules), Image.NEAREST)
+    (symbology, option_1, option_2), modules, _ = KINDS[kind]
+    symbol = zint.Symbol()
+    symbol.symbology = getattr(zint.Symbology, symbology)
+    symbol.option_1 = option_1
+    symbol.option_2 = option_2
+    symbol.encode(value)
+    symbol.buffer()
+    if (symbol.rows, symbol.width) != (modules, modules):
+        raise ValueError(f"{value} does not fit a {modules}x{modules} {kind} code")
+    bitmap = symbol.bitmap
+    size = bitmap.shape[1], bitmap.shape[0]
+    return Image.frombytes("RGB", size, bitmap.tobytes()).convert("L").resize((modules, modules), Image.NEAREST)
 
 
 def build_strip(tape: int):
@@ -219,11 +222,14 @@ def label_page(label, tape: int, index: int, total: int, half_cut: bool) -> byte
 
 class Printer:
     def __enter__(self):
+        import libusb_package
         import usb.core
         import usb.util
 
         self.usb_core, self.usb_util = usb.core, usb.util
-        self.dev = usb.core.find(idVendor=USB_VENDOR, idProduct=USB_PRODUCT)
+        # libusb-package bundles libusb, so no system library is needed.
+        backend = libusb_package.get_libusb1_backend()
+        self.dev = usb.core.find(idVendor=USB_VENDOR, idProduct=USB_PRODUCT, backend=backend)
         if self.dev is None:
             raise SystemExit("PT-P900W not found on USB")
         self.intf = self.dev.get_active_configuration()[(0, 0)]

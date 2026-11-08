@@ -39,20 +39,23 @@ and yellow tape, so other surfaces may behave differently.
 
 ## Usage
 
+Only [uv](https://docs.astral.sh/uv/) is required. It installs Python and all dependencies, including
+libusb and zint, on the first run.
+
 ```bash
-nix-shell --run 'python3 -I labels.py status'
+uv run labels.py status
 ```
 
 ```bash
-nix-shell --run 'python3 -I labels.py labels 20'
+uv run labels.py labels 20
 ```
 
 ```bash
-nix-shell --run 'python3 -I labels.py labels 20 --tape 9'
+uv run labels.py labels 20 --tape 9
 ```
 
 ```bash
-nix-shell --run 'python3 -I read_photo.py photo1.jpg photo2.jpg'
+uv run read_photo.py photo1.jpg photo2.jpg
 ```
 
 Without `--tape`, the script shows the detected tape and asks for confirmation (`[Y/n]`, Enter
